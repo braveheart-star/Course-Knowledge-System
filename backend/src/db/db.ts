@@ -16,7 +16,7 @@ const sql = postgres(connectionString, {
   connect_timeout: 10, // 10 seconds connection timeout
   idle_timeout: 30, // 30 seconds idle timeout
   max: 20, // Maximum number of connections
-  keep_alive: true,
+  keep_alive: 1, // Keep alive in seconds
 });
 
 sql`SELECT 1`
