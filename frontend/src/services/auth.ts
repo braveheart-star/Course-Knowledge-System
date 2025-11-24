@@ -1,6 +1,4 @@
-import axios from 'axios';
-
-const API_URL = '/api';
+import axiosInstance from './axios';
 
 export interface User {
   id: string;
@@ -15,14 +13,10 @@ export interface AuthResponse {
 }
 
 export const signUp = async (email: string, password: string, name?: string): Promise<void> => {
-  const response = await axios.post<AuthResponse>(`${API_URL}/auth/signup`, {
+  const response = await axiosInstance.post<AuthResponse>(`/auth/signup`, {
     email,
     password,
     name,
-  }, {
-    headers: {
-      'Content-Type': 'application/json',
-    },
   });
   
   if (response.data.token) {
@@ -34,13 +28,9 @@ export const signUp = async (email: string, password: string, name?: string): Pr
 };
 
 export const signIn = async (email: string, password: string): Promise<void> => {
-  const response = await axios.post<AuthResponse>(`${API_URL}/auth/signin`, {
+  const response = await axiosInstance.post<AuthResponse>(`/auth/signin`, {
     email,
     password,
-  }, {
-    headers: {
-      'Content-Type': 'application/json',
-    },
   });
   
   if (response.data.token) {

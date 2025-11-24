@@ -1,7 +1,7 @@
 import axios from 'axios';
 import { getToken, logout } from './auth';
 
-const API_URL = '/api';
+const API_URL = process.env.NEXT_PUBLIC_API_URL || '/api';
 
 const axiosInstance = axios.create({
   baseURL: API_URL,

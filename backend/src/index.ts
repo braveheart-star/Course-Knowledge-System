@@ -18,24 +18,21 @@ const server = http.createServer(app);
 
 initializeRealtime(server);
 
-app.use(cors({
-  origin: process.env.FRONTEND_URL || "http://localhost:3000",
-  credentials: true,
-}));
+app.use(cors());
 app.use(express.json());
 
 app.get("/health", (req, res) => {
   res.json({ status: "ok", message: "Course Knowledge System API" });
 });
 
+
 app.use("/api/auth", authRoutes);
 
-app.use("/api", authenticate);
-
-app.use("/api/courses", coursesRoutes);
-app.use("/api/enrollments", enrollmentsRoutes);
-app.use("/api/notifications", notificationsRoutes);
-app.use("/api/chat", chatRoutes);
+// Protected routes - require authentication
+app.use("/api/courses", authenticate, coursesRoutes);
+app.use("/api/enrollments", authenticate, enrollmentsRoutes);
+app.use("/api/notifications", authenticate, notificationsRoutes);
+app.use("/api/chat", authenticate, chatRoutes);
 
 server.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
