@@ -4,6 +4,10 @@ A secure course knowledge system with RAG (Retrieval-Augmented Generation) capab
 
 
 
+https://github.com/user-attachments/assets/75e6ba2f-d3c6-479c-a372-f19008f5448a
+
+
+
 ## Getting Started
 
 ### 1. Install Dependencies
