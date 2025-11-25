@@ -32,23 +32,23 @@ export function getMCPToolsAsOpenAIFunctions(): ChatCompletionTool[] {
       type: 'function',
       function: {
         name: 'search_course_content',
-        description: 'Search course content by semantic similarity. Returns relevant chunks from lessons in courses the user is enrolled in. ONLY use this tool when the user asks a SPECIFIC, CLEAR question about course content, concepts, or topics that you are confident exist in their enrolled courses. DO NOT use for: greetings (hi, hello), vague questions, unclear questions, or when you\'re unsure if the topic exists. If uncertain, do NOT call this tool.',
+        description: 'Search course content by semantic similarity. Returns relevant chunks from lessons in courses the user is enrolled in. ALWAYS use this tool when the user asks about course concepts, topics, definitions, explanations, or any question that could be answered from course material. Use this tool for questions like "what is X?", "explain Y", "how does Z work?", etc. The tool will return empty results if the topic is not found, so it\'s safe to use even when uncertain. DO NOT use only for simple greetings.',
         parameters: {
           type: 'object',
           properties: {
             query: {
               type: 'string',
-              description: 'The search query about course content, concepts, or topics. Only use when user asks about specific course material.',
+              description: 'The search query about course content, concepts, or topics. Use the user\'s question or key terms from their question.',
             },
             limit: {
               type: 'number',
-              description: 'Maximum number of results to return (default: 10)',
-              default: 10,
+              description: 'Maximum number of results to return (default: 5)',
+              default: 5,
             },
             similarityThreshold: {
               type: 'number',
-              description: 'Minimum similarity score (0-1, default: 0.7). Lower values return more results but may be less relevant.',
-              default: 0.7,
+              description: 'Minimum similarity score (0-1, default: 0.85). Lower values return more results but may be less relevant.',
+              default: 0.85,
             },
             courseId: {
               type: 'string',
@@ -143,4 +143,59 @@ export async function generateOpenAIAnswer(
 }
 
 export type OpenAIMessage = ChatCompletionMessageParam;
+
+export interface QuestionClassification {
+  needsSearch: boolean;
+  reason: string;
+}
+
+export async function classifyQuestion(question: string): Promise<QuestionClassification> {
+  try {
+    const client = getClient();
+    
+    const response = await client.chat.completions.create({
+      model: OPENAI_MODEL,
+      temperature: 0.1,
+      messages: [
+        {
+          role: 'system',
+          content: `You are a question classifier for a course knowledge system. Your job is to determine if a user's question requires searching course content or if it's just a greeting, thanks, or casual conversation.
+
+Classify the question into one of these categories:
+1. "needs_search" - The question asks about course content, concepts, topics, definitions, explanations, or anything that could be answered from course material (e.g., "what is X?", "explain Y", "how does Z work?", "tell me about...")
+2. "no_search" - Simple greetings (hi, hello, hey, good morning, etc.), thanks, casual conversation, or questions about the system itself
+
+Respond ONLY with a JSON object in this exact format:
+{
+  "needsSearch": true or false,
+  "reason": "brief explanation"
+}`
+        },
+        {
+          role: 'user',
+          content: question
+        }
+      ],
+      response_format: { type: 'json_object' }
+    });
+
+    const content = response.choices[0].message.content;
+    if (!content) {
+      throw new Error('Empty response from OpenAI');
+    }
+
+    const classification = JSON.parse(content) as QuestionClassification;
+    return classification;
+  } catch (error: any) {
+    // Fallback to pattern matching if AI classification fails
+    const lowerQuestion = question.toLowerCase().trim();
+    const greetings = ['hi', 'hello', 'hey', 'good morning', 'good afternoon', 'good evening', 'thanks', 'thank you'];
+    const needsSearch = !greetings.some(g => lowerQuestion.startsWith(g) && lowerQuestion.length < 30);
+    
+    return {
+      needsSearch,
+      reason: needsSearch ? 'Question appears to be about course content' : 'Question appears to be a greeting or casual conversation'
+    };
+  }
+}
 

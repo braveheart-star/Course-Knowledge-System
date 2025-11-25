@@ -13,7 +13,7 @@ export interface AuthResponse {
 }
 
 export const signUp = async (email: string, password: string, name?: string): Promise<void> => {
-  const response = await axiosInstance.post<AuthResponse>(`/auth/signup`, {
+  const response = await axiosInstance.post<AuthResponse>('/auth/signup', {
     email,
     password,
     name,
@@ -28,7 +28,7 @@ export const signUp = async (email: string, password: string, name?: string): Pr
 };
 
 export const signIn = async (email: string, password: string): Promise<void> => {
-  const response = await axiosInstance.post<AuthResponse>(`/auth/signin`, {
+  const response = await axiosInstance.post<AuthResponse>('/auth/signin', {
     email,
     password,
   });

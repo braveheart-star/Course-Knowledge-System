@@ -4,48 +4,131 @@ A secure course knowledge system with RAG (Retrieval-Augmented Generation) capab
 
 ## Getting Started
 
-1. Install dependencies:
+### 1. Install Dependencies
 ```bash
-# Install dependencies
 npm run install:all
-
-# Start servers
-npm run dev
 ```
 
-2. Configure backend environment:
-   - Create `.env` file and copy the content of `.env.example` file.
+### 2. Configure Environment
+- Create `frontend/.env` from `frontend/.env.example`
+- Create `backend/.env` from `backend/.env.example`
 
+### 3. Start Servers
+```bash
+npm run dev
+```
 Backend: `http://localhost:8000`  
 Frontend: `http://localhost:3000`
 
-## System Workflow
+### 4. Database Setup
 
-### 1. Authentication
-- **Sign Up/Login**: Email + password authentication with JWT tokens
-- **Role-based Access**: Emails starting with `admin_` → admin role (admin_01@gmail.com), others → user role
-- **Protected Routes**: Frontend and backend validate JWT tokens for access control
+**Create Tables:**
+```bash
+cd backend
+npm run db:create-tables
+```
 
-### 2. Course Enrollment
-- **User Request**: Users request enrollment in courses
-- **Admin Approval**: Admins approve/reject enrollment requests
-- **Real-time Updates**: WebSocket notifications for instant status updates
+**Seed Database:**
+```bash
+npm run db:seed
+```
 
-### 3. Content Management
-- **Content Structure**: Courses → Modules → Lessons
-- **Chunking**: Lesson content automatically split into semantic chunks
-- **Vector Embeddings**: Chunks converted to embeddings (gte-small, 384 dimensions) via Supabase
-- **Storage**: Embeddings stored in PostgreSQL with pgvector extension
-- **Access Control**: Users can only access enrolled course content
+### 5. Process Course Content
 
-### 4. Chat Agent & RAG Pipeline
-- **Question Processing**: User asks question → Chat agent receives request
-- **AI Tool Calling**: OpenAI decides when to use MCP tools (search/read content)
-- **Semantic Search**: Query embedded → Vector search in enrolled courses using pgvector
-- **Answer Generation**: AI generates conversational answer from retrieved content
-- **Source Attribution**: Response includes course/module/lesson sources
+**Chunk Lessons:**
+```bash
+# Chunk all lessons
+npm run chunk:lessons
 
-### 5. Real-time Communication
+# Chunk specific lesson
+npm run chunk:lesson <lessonId>
+```
+
+**Embed Chunks:**
+```bash
+# Embed all unembedded chunks
+npm run embed:lessons
+
+# Embed specific lesson
+npm run embed:lesson <lessonId>
+```
+
+### 6. Deploy Supabase Functions
+
+**Login to Supabase:**
+```bash
+npm run supabase:login
+```
+
+**Link Project:**
+```bash
+npm run supabase:link
+```
+
+**Deploy Embed Function:**
+```bash
+npm run supabase:functions:deploy
+```
+
+## Core Features & Implementation
+
+### 1. Authentication & Authorization
+- **Email + Password Authentication**: Secure login with password hashing (bcrypt)
+- **JWT Tokens**: Stateless authentication with token-based access control
+- **Role-based Access Control**: 
+  - Admin role: Emails starting with `admin_` (e.g., `admin_01@gmail.com`)
+  - User role: All other emails
+- **Protected Routes**: Both frontend and backend validate JWT tokens for all protected endpoints
+
+### 2. Course Enrollment System
+- **User Enrollment Requests**: Users can request enrollment in available courses
+- **Admin Enrollment Management**: Admins can directly enroll users or approve/reject requests
+- **Real-time Notifications**: WebSocket-based instant updates for enrollment status changes
+- **Enrollment Status**: Tracks pending, confirmed, and rejected enrollment states
+
+### 3. Content Structure & Management
+- **Hierarchical Organization**: Courses → Modules → Lessons
+- **Content Chunking**: Lesson content automatically split into semantic chunks for optimal retrieval
+- **Vector Embeddings**: 
+  - Chunks converted to 384-dimensional vectors using gte-small model
+  - Embeddings generated via Supabase Edge Functions
+  - Stored in PostgreSQL using pgvector extension
+- **Access Control**: Strict enforcement - users can only access content from courses they are enrolled in
+
+### 4. Custom MCP Server Implementation
+- **Protocol**: Custom MCP server built using MCP SDK (no framework-specific black box)
+- **Server Architecture**: Standalone server process communicating via stdio transport
+- **Exposed Tools**:
+  - `search_course_content`: Semantic search tool for finding relevant course content
+  - `read_lesson_content`: Tool to retrieve full lesson content with access verification
+- **MCP Client**: Manages connection lifecycle, handles tool calls and structured responses
+- **Communication Flow**: Chat Agent → MCP Client → MCP Server → RAG Service → Database
+- **Error Handling**: Structured error responses following MCP protocol standards
+- **Connection Management**: Singleton client manager with automatic reconnection and error recovery
+
+### 5. Chat Agent (MCP Tool-Only Access)
+- **Tool-Exclusive Access**: Chat agent answers questions using **only** MCP tools (no direct database access)
+- **OpenAI Integration**: GPT-4o-mini with function calling capabilities
+- **Autonomous Tool Selection**: AI autonomously decides when to call MCP tools based on question context
+- **Question Classification**: Pre-classifies questions to determine if course content search is needed
+- **Conversation Management**: Maintains conversation history (last 6 messages) for context-aware responses
+- **Answer Generation**: Generates conversational answers using only retrieved course content
+- **Source Attribution**: Returns structured response with course/module/lesson sources and similarity scores
+- **Fallback Handling**: Provides appropriate responses when search results are empty or irrelevant
+
+### 6. RAG (Retrieval-Augmented Generation) Pipeline
+- **Query Processing**: User question converted to 384-dimensional vector using gte-small embedding model
+- **Enrollment Verification**: Strict access control - only searches within courses user is enrolled in (status: 'confirmed')
+- **Semantic Similarity Search**: 
+  - Uses pgvector cosine similarity operator (`<=>`) for efficient vector search
+  - Default similarity threshold: 0.85 (configurable)
+  - Configurable result limit (default: 5 results)
+  - Optional course-specific filtering
+- **Result Processing**: Returns chunks with full course/module/lesson hierarchy and similarity scores
+- **Access Control**: Verifies enrollment before returning any lesson content
+- **Database Integration**: Direct SQL queries with pgvector operators for optimal performance
+
+### 7. Real-time Communication
 - **WebSocket**: Socket.IO for real-time bidirectional communication
 - **Events**: Enrollment requests, approvals, rejections broadcasted instantly
 - **UI Updates**: Frontend automatically updates without page refresh

@@ -33,8 +33,8 @@ export async function executeMCPTool(
         }
 
         const results = await searchCourseContent(query, userId, {
-          limit: limit || 10,
-          similarityThreshold: similarityThreshold || 0.7,
+          limit: limit || 5,
+          similarityThreshold: similarityThreshold || 0.85,
           courseId: courseId || undefined,
         });
 

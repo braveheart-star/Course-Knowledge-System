@@ -35,13 +35,13 @@ const tools: Tool[] = [
         },
         limit: {
           type: 'number',
-          description: 'Maximum number of results to return (default: 10)',
-          default: 10,
+          description: 'Maximum number of results to return (default: 5)',
+          default: 5,
         },
         similarityThreshold: {
           type: 'number',
-          description: 'Minimum similarity score (0-1, default: 0.7). Lower values return more results but may be less relevant.',
-          default: 0.7,
+          description: 'Minimum similarity score (0-1, default: 0.85). Lower values return more results but may be less relevant.',
+          default: 0.85,
         },
         courseId: {
           type: 'string',
@@ -81,7 +81,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
 
 server.setRequestHandler(CallToolRequestSchema, async (request) => {
   const { name, arguments: args } = request.params;
-
+  
   if (!name) {
     throw new Error('Tool name is required');
   }
@@ -97,7 +97,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 async function main() {
   const transport = new StdioServerTransport();
   await server.connect(transport);
-  await transport.start();
+  // Note: connect() automatically calls start(), so we don't need to call it manually
 }
 
 main().catch((error) => {

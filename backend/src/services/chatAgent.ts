@@ -1,6 +1,6 @@
 import { SearchResult } from './rag';
-import { generateOpenAIAnswer, getMCPToolsAsOpenAIFunctions, OpenAIMessage } from './openAIChat';
-import { callMCPTool } from '../mcp/client';
+import { generateOpenAIAnswer, getMCPToolsAsOpenAIFunctions, OpenAIMessage, classifyQuestion } from './openAIChat';
+import { callMCPTool } from '../mcp/mcpClient';
 
 export interface ChatMessage {
   role: 'user' | 'assistant';
@@ -28,36 +28,42 @@ const NO_CONTEXT_MESSAGE =
 
 const SYSTEM_PROMPT = `You are a helpful course assistant for the Course Knowledge System.
 
-CRITICAL RULES:
-1. DO NOT use tools (search_course_content, read_lesson_content) for:
-   - Greetings (hi, hello, hey, etc.) - just respond naturally
-   - Simple conversational questions that don't require course content
-   - Questions about the system itself
-   - General questions that don't relate to course material
-   - Questions where you don't know if the topic exists in courses
-   - Vague or unclear questions
-   Only use tools when the user asks a SPECIFIC, CLEAR question about course content, concepts, or topics that you are confident exist in their enrolled courses.
-   If you're unsure whether to use tools, DON'T use them - just answer naturally or ask for clarification.
+CRITICAL RULES - YOU MUST FOLLOW THESE STRICTLY:
 
-2. When you DO use tools and receive search results:
-   - Generate a SHORT, CLEAR answer (2-4 sentences max)
-   - Point to ESSENTIAL FACTS only based on the user's question, search results, and chat history
-   - Use conversational, friendly style
+1. ALWAYS use the search_course_content tool when the user asks questions about:
+   - Course concepts, topics, or subjects (e.g., "what is X?", "explain Y", "how does Z work?")
+   - Technical terms, definitions, or explanations
+   - Any question that could be answered from course material
+   
+2. WHEN YOU RECEIVE SEARCH RESULTS:
+   - YOU MUST ONLY USE INFORMATION FROM THE SEARCH RESULTS PROVIDED
+   - DO NOT use your own knowledge or training data
+   - DO NOT make up information or provide general knowledge
+   - If the search results don't contain relevant information about the user's question, you MUST say the topic is not available
+   - Check if the search results actually relate to the user's question - if they don't, tell the user the topic is not in their enrolled courses
+   
+3. IF SEARCH RESULTS ARE IRRELEVANT OR DON'T MATCH THE QUESTION:
+   - You MUST tell the user: "The topic you're asking about is not available in your currently enrolled courses. The search results I found are not related to your question. Please enroll in the corresponding course(s) that cover this topic first."
+   - DO NOT try to answer using your own knowledge
+   - DO NOT provide general information about the topic
+   - DO NOT suggest exploring unrelated courses
+   
+4. IF SEARCH RESULTS ARE RELEVANT:
+   - Generate a SHORT, CLEAR answer (2-4 sentences max) using ONLY the information from search results
    - Reference Course, Module, and Lesson names when citing information
-   - At the end, suggest the user explore the MOST RELATED COURSE and MODULE (the course with the highest resultCount in mostRelatedCourse)
+   - Use conversational, friendly style
+   - At the end, suggest the user explore the MOST RELATED COURSE and MODULE
    - Format suggestion: "I suggest exploring [Course Title] - [Module Title] to learn more about this topic."
-   - DO NOT list individual lessons - only suggest Course and Module
-
-3. If search results are empty (count: 0):
+   
+5. IF SEARCH RESULTS ARE EMPTY (count: 0):
    - Tell the user: "The topic you're asking about is not available in your currently enrolled courses. Please enroll in the corresponding course(s) that cover this topic first."
-   - DO NOT suggest exploring other courses or modules when results are empty
-   - DO NOT mention unrelated courses as alternatives
-   - Only tell them to enroll in the relevant course for the topic they asked about
+   - DO NOT use your own knowledge to answer
+   
+6. DO NOT use tools for:
+   - Simple greetings (hi, hello, hey) - just respond naturally
+   - Questions about the system itself
 
-4. For greetings or non-course questions:
-   - Answer naturally without using tools
-   - Be friendly and helpful
-   - Offer to help with course-related questions`;
+REMEMBER: You are ONLY a course content assistant. You MUST ONLY use information from search results. Never use your own knowledge when search results don't match the question.`;
 
 function buildFallbackAnswer(
   question: string,
@@ -199,7 +205,13 @@ function buildOpenAIMessages(
   const context = buildContextFromResults(searchResults);
   const userMessage: OpenAIMessage = {
     role: 'user',
-    content: `User question: ${question}\n\nCourse context:\n${context}\n\nInstructions:\n- Answer only with information from the course context.\n- Reference Course, Module, and Lesson names when citing facts.\n- If the answer is not in the context, explicitly say so.`,
+    content: `User question: ${question}\n\nCourse context from search results:\n${context}\n\nCRITICAL INSTRUCTIONS:
+- You MUST ONLY use information from the course context provided above
+- DO NOT use your own knowledge or training data
+- If the course context does not contain relevant information about the user's question, you MUST say: "The topic you're asking about is not available in your currently enrolled courses. The search results I found are not related to your question. Please enroll in the corresponding course(s) that cover this topic first."
+- Check if the search results actually relate to the user's question - if they don't match, tell the user the topic is not available
+- Reference Course, Module, and Lesson names when citing facts
+- If the answer is not in the context, explicitly say so and do NOT provide general knowledge`,
   };
 
   return [
@@ -223,6 +235,25 @@ export async function chatWithAgent(
   }
 
   try {
+    const classification = await classifyQuestion(question);
+    
+    if (!classification.needsSearch) {
+      const greetingMessages: OpenAIMessage[] = [
+        { 
+          role: 'system', 
+          content: 'You are a friendly course assistant. Respond naturally to greetings, thanks, and casual conversation. Be helpful and offer to assist with course-related questions.' 
+        },
+        ...(conversationHistory.slice(-4).map(m => ({ role: m.role, content: m.content }))),
+        { role: 'user', content: question }
+      ];
+      
+      const answer = await generateOpenAIAnswer(greetingMessages);
+      return {
+        answer,
+        sources: [],
+      };
+    }
+
     const tools = getMCPToolsAsOpenAIFunctions();
     const allSearchResults: SearchResult[] = [];
     let toolWasCalled = false;
@@ -278,6 +309,18 @@ export async function chatWithAgent(
                   count: 0,
                   message: "No relevant content found in your enrolled courses. The topic you're asking about is not covered in your currently enrolled courses. Please enroll in the corresponding course(s) that cover this topic first.",
                   noResults: true,
+                }, null, 2);
+              }
+              
+              const avgSimilarity = searchResults.reduce((sum, r) => sum + r.similarity, 0) / searchResults.length;
+              
+              if (avgSimilarity < 0.80) {
+                return JSON.stringify({
+                  results: searchResultsData,
+                  count: resultData.count,
+                  message: "The search results found are not highly relevant to your question. The topic you're asking about may not be available in your currently enrolled courses. Please enroll in the corresponding course(s) that cover this topic first.",
+                  lowRelevance: true,
+                  avgSimilarity: avgSimilarity,
                 }, null, 2);
               }
 
@@ -350,13 +393,67 @@ export async function chatWithAgent(
       answer = await generateOpenAIAnswer(messages, undefined, tools, toolCallHandler);
       
       if (!toolWasCalled) {
+        try {
+          const mcpResult = await callMCPTool('search_course_content', {
+            query: question,
+            userId,
+          });
+          
+          if (!mcpResult.isError) {
+            const resultData = JSON.parse(mcpResult.content[0].text);
+            const searchResultsData = resultData.results || [];
+            
+            const searchResults: SearchResult[] = searchResultsData.map((r: any) => ({
+              chunk: {
+                id: r.chunkId || '',
+                content: r.chunk,
+                chunkIndex: r.chunkIndex || 0,
+              },
+              lesson: {
+                id: r.lessonId,
+                title: r.lesson,
+              },
+              module: {
+                id: r.moduleId,
+                title: r.module,
+              },
+              course: {
+                id: r.courseId,
+                title: r.course,
+              },
+              similarity: r.similarity,
+            }));
+            
+            allSearchResults.push(...searchResults);
+            
+            if (searchResults.length > 0) {
+              const avgSimilarity = searchResults.reduce((sum, r) => sum + r.similarity, 0) / searchResults.length;
+              if (avgSimilarity < 0.80) {
+                answer = "The topic you're asking about is not available in your currently enrolled courses. The search results I found are not related to your question. Please enroll in the corresponding course(s) that cover this topic first.";
+              } else {
+                const context = buildContextFromResults(searchResults);
+                const contextMessages: OpenAIMessage[] = [
+                  { role: 'system', content: SYSTEM_PROMPT },
+                  ...historyMessages,
+                  { role: 'user', content: `User question: ${question}\n\nCourse context from search results:\n${context}\n\nCRITICAL: You MUST ONLY use information from the course context above. If the context does not contain relevant information about the user's question, you MUST say the topic is not available in enrolled courses. DO NOT use your own knowledge.` },
+                ];
+                answer = await generateOpenAIAnswer(contextMessages);
+              }
+            }
+          }
+        } catch (fallbackError: any) {
+          // Fallback search failed, continue with original answer
+        }
+      }
+      
+      if (!toolWasCalled && allSearchResults.length === 0) {
         return {
           answer,
           sources: [],
         };
       }
       
-      if (allSearchResults.length === 0 && toolWasCalled) {
+      if (allSearchResults.length === 0) {
         if (answer && !answer.toLowerCase().includes('enroll')) {
           answer = NO_CONTEXT_MESSAGE;
         }
@@ -366,8 +463,6 @@ export async function chatWithAgent(
         }
       }
     } catch (openAiError: any) {
-      console.error('OpenAI generation failed:', openAiError.message);
-      
       if (allSearchResults.length > 0) {
         answer = buildFallbackAnswer(question, allSearchResults, conversationHistory);
       } else {

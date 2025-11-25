@@ -1,13 +1,14 @@
 import axios from 'axios';
 import { getToken, logout } from './auth';
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || '/api';
+const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 
 const axiosInstance = axios.create({
-  baseURL: API_URL,
+  baseURL: `${API_URL}/api`,
   headers: {
     'Content-Type': 'application/json',
   },
+  withCredentials: true,
 });
 
 axiosInstance.interceptors.request.use(

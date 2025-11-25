@@ -7,9 +7,10 @@
 
 import { db } from '../db';
 import { lessonChunks, lessons, modules, courses, enrollments } from '../db/schema';
-import { eq, and } from 'drizzle-orm';
+import { eq, and, inArray } from 'drizzle-orm';
 import { generateEmbedding } from './embeddings';
 import sqlRaw from '../db/db';
+import { withRetry } from '../db/retry';
 
 export interface SearchResult {
   chunk: {
@@ -50,21 +51,22 @@ export async function searchCourseContent(
   if (!query || query.trim().length === 0) {
     throw new Error('Query cannot be empty');
   }
-
-  const limit = options.limit || 10;
-  const similarityThreshold = options.similarityThreshold || 0.7;
+  const limit = options.limit || 5;
+  const similarityThreshold = options.similarityThreshold || 0.85;
 
   const queryEmbedding = await generateEmbedding(query.trim());
 
-  const enrolledCourses = await db
-    .select({ courseId: enrollments.courseId })
-    .from(enrollments)
-    .where(
-      and(
-        eq(enrollments.userId, userId),
-        eq(enrollments.status, 'confirmed')
+  const enrolledCourses = await withRetry(() =>
+    db
+      .select({ courseId: enrollments.courseId })
+      .from(enrollments)
+      .where(
+        and(
+          eq(enrollments.userId, userId),
+          eq(enrollments.status, 'confirmed')
+        )
       )
-    );
+  );
 
   if (enrolledCourses.length === 0) {
     return [];
@@ -72,17 +74,47 @@ export async function searchCourseContent(
 
   const enrolledCourseIds = enrolledCourses.map(e => e.courseId);
   
-  let courseFilter = enrolledCourseIds;
+  if (enrolledCourseIds.length === 0) {
+    return [];
+  }
+  
+  let courseIdsToSearch = enrolledCourseIds;
   if (options.courseId) {
     if (!enrolledCourseIds.includes(options.courseId)) {
       throw new Error('You are not enrolled in this course');
     }
-    courseFilter = [options.courseId];
+    courseIdsToSearch = [options.courseId];
   }
 
-  const vectorString = `[${queryEmbedding.join(',')}]`;
+  const enrolledModules = await withRetry(() =>
+    db
+      .select({ moduleId: modules.id })
+      .from(modules)
+      .where(inArray(modules.courseId, courseIdsToSearch))
+  );
   
-  const results = await sqlRaw`
+  if (enrolledModules.length === 0) {
+    return [];
+  }
+  
+  const moduleIds = enrolledModules.map(m => m.moduleId);
+  
+  const enrolledLessons = await withRetry(() =>
+    db
+      .select({ lessonId: lessons.id })
+      .from(lessons)
+      .where(inArray(lessons.moduleId, moduleIds))
+  );
+  
+  if (enrolledLessons.length === 0) {
+    return [];
+  }
+  
+  const lessonIds = enrolledLessons.map(l => l.lessonId);
+  const vectorString = `[${queryEmbedding.join(',')}]`;
+  const lessonIdsArray = lessonIds;
+  
+  const results = await withRetry(() => sqlRaw`
     SELECT 
       lc.id as chunk_id,
       lc.content as chunk_content,
@@ -100,11 +132,11 @@ export async function searchCourseContent(
     INNER JOIN "Courses" c ON m.course_id = c.id
     WHERE 
       lc.embedding IS NOT NULL
-      AND c.id = ANY(${courseFilter}::uuid[])
+      AND lc.lesson_id = ANY(${lessonIdsArray}::uuid[])
       AND (1 - (lc.embedding <=> ${vectorString}::vector)) >= ${similarityThreshold}
     ORDER BY lc.embedding <=> ${vectorString}::vector
     LIMIT ${limit}
-  `;
+  `);
 
   return results.map((row: any) => ({
     chunk: {
@@ -152,18 +184,20 @@ export async function getLessonContent(
     title: string;
   };
 } | null> {
-  const enrollmentCheck = await db
-    .select()
-    .from(lessons)
-    .innerJoin(modules, eq(lessons.moduleId, modules.id))
-    .innerJoin(courses, eq(modules.courseId, courses.id))
-    .innerJoin(enrollments, and(
-      eq(enrollments.courseId, courses.id),
-      eq(enrollments.userId, userId),
-      eq(enrollments.status, 'confirmed')
-    ))
-    .where(eq(lessons.id, lessonId))
-    .limit(1);
+  const enrollmentCheck = await withRetry(() =>
+    db
+      .select()
+      .from(lessons)
+      .innerJoin(modules, eq(lessons.moduleId, modules.id))
+      .innerJoin(courses, eq(modules.courseId, courses.id))
+      .innerJoin(enrollments, and(
+        eq(enrollments.courseId, courses.id),
+        eq(enrollments.userId, userId),
+        eq(enrollments.status, 'confirmed')
+      ))
+      .where(eq(lessons.id, lessonId))
+      .limit(1)
+  );
 
   if (enrollmentCheck.length === 0) {
     return null;
