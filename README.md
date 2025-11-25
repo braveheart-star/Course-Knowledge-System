@@ -22,8 +22,7 @@ npm run dev
 Backend: `http://localhost:8000`  
 Frontend: `http://localhost:3000`
 
-### 4. Database Setup (Optional if you use the same contents from `.env.example` file)
-
+### 4. Database Setup (Optional if you’re using the same values from the `.env.example` file)
 **Create Tables:**
 ```bash
 cd backend
@@ -35,7 +34,7 @@ npm run db:create-tables
 npm run db:seed
 ```
 
-### 5. Process Course Content
+### 5. Process Course Content (Optional if you’re using the same values from the `.env.example` file)
 
 **Chunk Lessons:**
 ```bash
