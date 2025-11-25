@@ -2,11 +2,7 @@
 
 A secure course knowledge system with RAG (Retrieval-Augmented Generation) capabilities.
 
-
-
 https://github.com/user-attachments/assets/75e6ba2f-d3c6-479c-a372-f19008f5448a
-
-
 
 ## Getting Started
 
@@ -16,8 +12,8 @@ npm run install:all
 ```
 
 ### 2. Configure Environment
-- Create `frontend/.env` from `frontend/.env.example`
-- Create `backend/.env` from `backend/.env.example`
+- Create `frontend/.env` and copy the contents from `frontend/.env.example`
+- Create `backend/.env` and copy the contents from `backend/.env.example`.  Make sure to add your own OpenAI API key (you can keep the other environment values as they are)
 
 ### 3. Start Servers
 ```bash
