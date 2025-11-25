@@ -54,7 +54,7 @@ npm run embed:lessons
 npm run embed:lesson <lessonId>
 ```
 
-### 6. Deploy Supabase Functions
+### 6. Deploy Supabase Functions (Optional if you’re using the same values from the `.env.example` file)
 
 **Login to Supabase:**
 ```bash
