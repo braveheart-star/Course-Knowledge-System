@@ -1,6 +1,6 @@
 import { Response } from "express";
 import { AuthRequest } from "../middleware/auth";
-import { chatWithAgent, getDetailedLessonInfo, ChatMessage } from "../services/chatAgent";
+import { chatWithAgent, ChatMessage } from "../services/chatAgent";
 
 export const askQuestion = async (req: AuthRequest, res: Response) => {
   try {
@@ -27,34 +27,6 @@ export const askQuestion = async (req: AuthRequest, res: Response) => {
       return res.status(403).json({ error: error.message });
     }
     
-    res.status(500).json({ error: error.message || "Internal server error" });
-  }
-};
-
-export const getLessonInfo = async (req: AuthRequest, res: Response) => {
-  try {
-    const userId = req.userId;
-    const { lessonId } = req.params;
-
-    if (!userId) {
-      return res.status(401).json({ error: "Unauthorized" });
-    }
-
-    if (!lessonId) {
-      return res.status(400).json({ error: "Lesson ID is required" });
-    }
-
-    const lessonInfo = await getDetailedLessonInfo(lessonId, userId);
-
-    if (!lessonInfo) {
-      return res.status(404).json({ 
-        error: "Lesson not found or you are not enrolled in this course" 
-      });
-    }
-
-    res.json(lessonInfo);
-  } catch (error: any) {
-    console.error("Error fetching lesson info:", error);
     res.status(500).json({ error: error.message || "Internal server error" });
   }
 };

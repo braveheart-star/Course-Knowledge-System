@@ -501,39 +501,3 @@ export async function chatWithAgent(
   }
 }
 
-export async function getDetailedLessonInfo(
-  lessonId: string,
-  userId: string
-): Promise<{
-  course: string;
-  module: string;
-  lesson: string;
-  content: string;
-} | null> {
-  try {
-    const mcpResult = await callMCPTool('read_lesson_content', {
-      lessonId,
-      userId,
-    });
-
-    if (mcpResult.isError) {
-      return null;
-    }
-
-    const resultData = JSON.parse(mcpResult.content[0].text);
-
-    if (resultData.error) {
-      return null;
-    }
-
-    return {
-      course: resultData.course,
-      module: resultData.module,
-      lesson: resultData.lesson,
-      content: resultData.content,
-    };
-  } catch (error: any) {
-    throw new Error(`Failed to get lesson content: ${error.message}`);
-  }
-}
-

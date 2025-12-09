@@ -30,14 +30,3 @@ export async function askQuestion(
   });
   return response.data;
 }
-
-export async function getLessonInfo(lessonId: string): Promise<{
-  course: string;
-  module: string;
-  lesson: string;
-  content: string;
-}> {
-  const response = await axiosInstance.get(`/chat/lesson/${lessonId}`);
-  return response.data;
-}
-
