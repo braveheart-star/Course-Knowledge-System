@@ -4,6 +4,16 @@ export interface ChatMessage {
   role: 'user' | 'assistant';
   content: string;
   timestamp?: Date;
+  sources?: Array<{
+    courseId: string;
+    course: string;
+    moduleId: string;
+    module: string;
+    lessonId: string;
+    lesson: string;
+    chunk: string;
+    similarity: number;
+  }>;
 }
 
 export interface ChatResponse {

@@ -44,6 +44,7 @@ export const ChatBot: React.FC<ChatBotProps> = ({ userId }) => {
         role: 'assistant',
         content: response.answer,
         timestamp: new Date(),
+        sources: response.sources && response.sources.length > 0 ? response.sources : undefined,
       };
 
       setMessages((prev) => [...prev, assistantMessage]);
@@ -139,8 +140,32 @@ export const ChatBot: React.FC<ChatBotProps> = ({ userId }) => {
                       {message.content}
                     </div>
                   ) : (
-                    <div style={styles.assistantMessageBubble}>
-                      <div style={styles.messageText}>{message.content}</div>
+                    <div>
+                      <div style={styles.assistantMessageBubble}>
+                        <div style={styles.messageText}>{message.content}</div>
+                      </div>
+                      {message.sources && message.sources.length > 0 && (
+                        <div style={styles.sourcesContainer}>
+                          <div style={styles.sourcesHeader}>📚 Sources:</div>
+                          <div style={styles.sourcesList}>
+                            {message.sources.slice(0, 5).map((source, idx) => (
+                              <div key={idx} style={styles.sourceItem}>
+                                <div style={styles.sourceTitle}>
+                                  {source.course} → {source.module} → {source.lesson}
+                                </div>
+                                <div style={styles.sourceSimilarity}>
+                                  Relevance: {Math.round(source.similarity * 100)}%
+                                </div>
+                              </div>
+                            ))}
+                            {message.sources.length > 5 && (
+                              <div style={styles.moreSources}>
+                                +{message.sources.length - 5} more source{message.sources.length - 5 > 1 ? 's' : ''}
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      )}
                     </div>
                   )}
                 </div>
@@ -351,6 +376,46 @@ const styles: { [key: string]: React.CSSProperties } = {
     backgroundColor: '#bdc3c7',
     cursor: 'not-allowed',
     transform: 'none',
+  },
+  sourcesContainer: {
+    marginTop: '8px',
+    padding: '10px',
+    backgroundColor: '#f0f4f8',
+    borderRadius: '8px',
+    border: '1px solid #e0e7ef',
+  },
+  sourcesHeader: {
+    fontSize: '12px',
+    fontWeight: '600',
+    color: '#4a5568',
+    marginBottom: '8px',
+  },
+  sourcesList: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '6px',
+  },
+  sourceItem: {
+    padding: '6px 8px',
+    backgroundColor: 'white',
+    borderRadius: '6px',
+    fontSize: '12px',
+    border: '1px solid #e2e8f0',
+  },
+  sourceTitle: {
+    color: '#2d3748',
+    fontWeight: '500',
+    marginBottom: '4px',
+  },
+  sourceSimilarity: {
+    color: '#718096',
+    fontSize: '11px',
+  },
+  moreSources: {
+    fontSize: '11px',
+    color: '#718096',
+    fontStyle: 'italic',
+    padding: '4px 8px',
   },
 };
 
