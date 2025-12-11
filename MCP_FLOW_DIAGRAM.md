@@ -239,7 +239,6 @@ const requestOptions = {
 let response = await client.chat.completions.create(requestOptions);
 let message = response.choices[0].message;
 
-// console.log('message ------>', message)
 // Here OpenAI's model extracts the query from the question:
 // If user asked "what is react hook?", OpenAI extracts "react hook"
 // If user asked "what is memo?", OpenAI extracts "memo"
@@ -254,7 +253,7 @@ let message = response.choices[0].message;
       id: 'call_uIaDEWcvzjAUDy6xDPIo1W4v',
       type: 'function',
       function: {
-        name: 'search_course_content',
+        name: 'search_course_content',       // ← OpenAI chose this tool
         arguments: '{"query":"react memo"}'  // ← Extracted by OpenAI model
       }
     }
@@ -264,40 +263,48 @@ let message = response.choices[0].message;
 }
 ```
 
-**Key Point:** OpenAI's model generates the arguments based on:
-- The user's question ("what is react memo?")
-- The tool parameter descriptions (e.g., "Use the user's question or key terms from their question")
-- The system prompt context
-- The conversation history (if any)
+**What happens:** 
+- The tools array (from `getMCPToolsAsOpenAIFunctions()`) is included in `requestOptions.tools`
+- This makes `search_course_content` available as a function that OpenAI can call
+- OpenAI sees the tools in the request, decides to call `search_course_content`, and generates the arguments `{"query":"react memo"}` based on the user's question
+
+This is the **FIRST** of two OpenAI API calls. The model uses the tool parameter descriptions (e.g., "Use the user's question or key terms from their question") and the user's question to generate appropriate arguments.
+
+**Why this is the first call:** OpenAI's model needs to decide:
+- Should I use a tool?
+- Which tool should I use?
+- What arguments should I pass?
 
 ---
 
-### Step 4: toolCallHandler Extracts Arguments
-**Location:** `services/openAIChat.ts` (line 107-108) → `services/chatAgent.ts` (lines 261-398)
+### Step 4: toolCallHandler Extracts Arguments and Executes Tool
+**Location:** `services/openAIChat.ts` (line 105-108) → `services/chatAgent.ts` (lines 261-398)
 
 ```typescript
-// Inside generateOpenAIAnswer(), when tool_calls are detected (openAIChat.ts line 107-108):
+// Inside generateOpenAIAnswer(), when tool_calls are detected (openAIChat.ts line 105):
 while (message.tool_calls && message.tool_calls.length > 0 && toolCallHandler) {
+  // Line 106: Execute the tool handler
   const toolResults = await toolCallHandler(message.tool_calls);
   //                                                ↑
   // Passes the array of tool calls from OpenAI: [toolCall1, toolCall2, ...]
 
-// toolCallHandler was defined earlier in chatAgent.ts (line 261):
-const toolCallHandler = async (toolCalls: any[]): Promise<any[]> => {
-  toolWasCalled = true;
-  const results = await Promise.all(
-    toolCalls.map(async (toolCall) => {
-      // console.log('toolCall function------>', toolCall.function)
-      // Output: { name: 'search_course_content', arguments: '{"query":"react memo"}' }
-      
-      const { name, arguments: args } = toolCall.function;
-      //      ↑                        ↑
-      //   "search_course_content"   '{"query":"react memo"}' (JSON string)
-      
-      const parsedArgs = JSON.parse(args);
-      // parsedArgs = { query: "react memo" }
-      
-      // Continue to step 5...
+  // toolCallHandler was defined earlier in chatAgent.ts (line 261):
+  const toolCallHandler = async (toolCalls: any[]): Promise<any[]> => {
+    toolWasCalled = true;
+    const results = await Promise.all(
+      toolCalls.map(async (toolCall) => {
+        // Extract tool name and arguments
+        // console.log('toolCall function------>', toolCall.function)
+        // Output: { name: 'search_course_content', arguments: '{"query":"react memo"}' }
+        
+        const { name, arguments: args } = toolCall.function;
+        //      ↑                        ↑
+        //   "search_course_content"   '{"query":"react memo"}' (JSON string)
+        
+        const parsedArgs = JSON.parse(args);
+        // parsedArgs = { query: "react memo" }
+        
+        // Continue to step 5 (callMCPTool)...
 ```
 
 ---
@@ -333,7 +340,7 @@ const result = await client.callTool({
 
 ---
 
-### Step 6: Receive MCP Results
+### Step 6: Receive and Process MCP Results
 **Location:** `mcp/mcpClient.ts` (returns result) → `services/chatAgent.ts` (line 301)
 
 ```typescript
@@ -354,7 +361,7 @@ result ------> {
         '      "module": "JavaScript Fundamentals",\n' +
         '      "lessonId": "f642d759-cb83-47fa-beae-e366174e8db5",\n' +
         '      "lesson": "Variables and Data Types",\n' +
-        '      "chunk": "JavaScript variables store data values and can be declared using let, const, or var. Modern JavaScript prefers let and const over var due to block scoping. const is used for values that won't be reassigned, while let allows reassignment.",\n' +
+        '      "chunk": "JavaScript variables store data values and can be declared using let, const, or var. Modern JavaScript prefers let and const over var due to block scoping. const is used for values that won\'t be reassigned, while let allows reassignment.",\n' +
         '      "chunkIndex": 0,\n' +
         '      "similarity": 0.891119122505188\n' +
         '    },\n' +
@@ -369,63 +376,104 @@ result ------> {
 // Back in toolCallHandler (chatAgent.ts line 301):
 const resultData = JSON.parse(mcpResult.content[0].text);
 
-// Results are then:
+// Results are processed:
 // 1. Parsed into SearchResult[] format
-// 2. Added to allSearchResults array (for sources tracking)
-// 3. Returned as JSON string to OpenAI
-// 4. Added to messages array with role: 'tool'
-// 5. OpenAI uses these results to generate final answer
+// 2. Added to allSearchResults array (for sources tracking in final response)
+// 3. Returned as JSON string to toolCallHandler
+// 4. ToolCallHandler returns the JSON string to generateOpenAIAnswer()
+// 5. The JSON string will be added to messages array with role: 'tool' (Step 7)
+// 6. OpenAI uses these results to generate final answer (Step 7)
 ```
 
 ---
 
-### Step 7: Final Answer Generation
-**Location:** `services/openAIChat.ts` (lines 110-141)
+### Step 7: Add Tool Results to Messages and Generate Final Answer (Second OpenAI Call)
+**Location:** `services/openAIChat.ts` (lines 108-141)
+
+**Note:** This is the **SECOND** OpenAI API call. After tool execution (Step 5-6), the results need to be added to the conversation before calling OpenAI again.
 
 ```typescript
-// After tool results are returned (openAIChat.ts lines 110-121):
-// The assistant's tool call message is added to conversation
+// After toolResults are returned from toolCallHandler (continue in openAIChat.ts):
+// Line 108: Add assistant's tool call message to conversation
 messages.push(message as ChatCompletionMessageParam);
 
-// Each tool result is added as a 'tool' role message
+// Lines 110-119: Add tool results to conversation
 for (let i = 0; i < message.tool_calls.length; i++) {
   const toolCall = message.tool_calls[i];
   const result = toolResults[i];
   
   messages.push({
-    role: 'tool',
-    tool_call_id: toolCall.id,
+    role: 'tool',  // ← Special role for tool results
+    tool_call_id: toolCall.id,  // Links to the tool call
     content: typeof result === 'string' ? result : JSON.stringify(result),
     // content contains the search results JSON string
   });
 }
 
-// OpenAI is called AGAIN with the tool results (line 123-129):
+// After this, the messages array includes:
+// - System message
+// - User question
+// - Assistant message (with tool call)
+// - Tool result (search results)
+
+// Line 121: OpenAI is called AGAIN (SECOND CALL) with the tool results:
 response = await client.chat.completions.create({
   model: OPENAI_MODEL,  // 'gpt-4o-mini'
   temperature,
-  messages,  // Now includes: system, user, assistant (tool call), tool (results)
+  messages,  // Now includes tool results!
+  // messages = [
+  //   { role: 'system', content: '...' },
+  //   { role: 'user', content: 'what is react memo?' },
+  //   { 
+  //     role: 'assistant', 
+  //     content: null,
+  //     tool_calls: [{ ... }]
+  //   },
+  //   {
+  //     role: 'tool',
+  //     tool_call_id: 'call_uIaDEWcvzjAUDy6xDPIo1W4v',
+  //     content: '{"results":[...],"count":3}'  // ← Search results
+  //   }
+  // ],
   tools: tools,
   tool_choice: 'auto',
 });
 
 message = response.choices[0].message;
+// Response from OpenAI:
+// {
+//   role: 'assistant',
+//   content: 'React.memo is a higher-order component that memoizes React components...',  // ← FINAL ANSWER!
+//   tool_calls: null  // No more tool calls needed
+// }
 
-// Extract the final answer (line 136-141):
+// Line 132: Extract and return the final answer
 const answer = message.content?.trim();
 // Example answer: "Flexbox is a one-dimensional layout model in CSS that is perfect for aligning items in rows or columns. It provides various properties such as `flex-direction`, `justify-content`, `align-items`, `flex-wrap`, and `flex-grow/shrink/basis` to control the behavior of items within a container. Flexbox is particularly useful for..."
 
-// Return answer to chatAgent
 return answer;
-
-// Final answer is returned to chatAgent.chatWithAgent()
-// chatAgent formats response with sources and returns to controller
-// Controller sends to frontend as: { answer: "...", sources: [...] }
 ```
+
+**What happens:** 
+- Tool results are added to the messages array with `role: 'tool'`
+- OpenAI is called again with the complete conversation (including tool results)
+- OpenAI sees the tool results and generates a natural language answer
+- The final text response is returned
+
+**Why this is the second call:** After receiving tool results, OpenAI's model:
+- Reads the search results from the `tool` role messages
+- Synthesizes them into a natural language answer
+- Follows the system prompt instructions (only use course content)
+
+This is OpenAI's standard function/tool calling pattern: the model calls tools first, then uses their results to respond conversationally.
+
+The final answer is returned to `chatAgent.chatWithAgent()`, which formats the response with sources and returns to the controller. The controller sends to frontend as: `{ answer: "...", sources: [...] }`
 
 ---
 
 ## Execution Timeline Summary
+
+This timeline aligns with the detailed steps above:
 
 ```
 1. Browser → POST /api/chat/ask
@@ -434,53 +482,53 @@ return answer;
 2. Controller (chatController.ts) → chatWithAgent()
    Extracts: userId, question, conversationHistory
    ↓
-3. chatAgent.ts → Classification
+3. chatAgent.ts → Classification (Step 2)
    classifyQuestion() determines if needsSearch = true/false
    ↓
-4. chatAgent.ts → generateOpenAIAnswer() called
+4. chatAgent.ts → generateOpenAIAnswer() called (Step 3)
    Passes: messages, tools, toolCallHandler
    ↓
-5. openAIChat.ts → First OpenAI API call
+5. openAIChat.ts → First OpenAI API call (Step 3)
    requestOptions with: model, temperature, messages, tools, tool_choice
    ↓
-6. OpenAI Response → tool_calls generated
+6. OpenAI Response → tool_calls generated (Step 3)
    message.tool_calls = [{ function: { name: "search_course_content", arguments: '{"query":"react memo"}' } }]
    ↓
-7. openAIChat.ts → toolCallHandler executed
+7. openAIChat.ts → toolCallHandler executed (Step 4)
    Passes tool_calls array to handler
    ↓
-8. chatAgent.ts → toolCallHandler extracts arguments
+8. chatAgent.ts → toolCallHandler extracts arguments (Step 4)
    const { name, arguments: args } = toolCall.function
    parsedArgs = { query: "react memo" }
    ↓
-9. chatAgent.ts → callMCPTool()
+9. chatAgent.ts → callMCPTool() (Step 5)
    Args: { query: "react memo", userId: "..." }
    ↓
-10. mcpClient.ts → client.callTool()
+10. mcpClient.ts → client.callTool() (Step 5)
     MCP library sends tool call to MCP Server via stdio
     ↓
 11. MCP Server → Executes search_course_content tool
     Database query → vector similarity search
     ↓
-12. MCP Server → Returns results
+12. MCP Server → Returns results (Step 6)
     result.content[0].text = JSON.stringify({ results: [...], count: 3 })
     ↓
-13. mcpClient.ts → Returns mcpResult to toolCallHandler
+13. mcpClient.ts → Returns mcpResult to toolCallHandler (Step 6)
     ↓
-14. chatAgent.ts → Parses results, adds to allSearchResults
-    Returns JSON string to toolCallHandler
+14. chatAgent.ts → Parses results, adds to allSearchResults (Step 6)
+    Returns JSON string to generateOpenAIAnswer()
     ↓
-15. openAIChat.ts → Adds tool results to messages array
+15. openAIChat.ts → Adds tool results to messages array (Step 7)
     messages.push({ role: 'tool', tool_call_id: ..., content: toolResults })
     ↓
-16. openAIChat.ts → Second OpenAI API call
+16. openAIChat.ts → Second OpenAI API call (Step 7)
     OpenAI generates final answer using search results
     ↓
-17. openAIChat.ts → Extract answer
+17. openAIChat.ts → Extract answer (Step 7)
     answer = message.content?.trim()
     Returns to chatAgent
     ↓
-18. chatAgent.ts → Formats response
+18. chatAgent.ts → Formats response with sources
     { answer: "...", sources: [...] }
     ↓
 19. Controller → Returns to frontend
